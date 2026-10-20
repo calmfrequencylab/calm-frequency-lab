@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Calm Frequency Lab — Friends Pilot</title>
+<style>
+:root{font-family:system-ui,-apple-system,sans-serif;color-scheme:dark;background:#111827;color:#f9fafb}
+body{max-width:650px;margin:auto;padding:22px;line-height:1.5}h1{font-size:1.8rem}h2{font-size:1.1rem}
+.card{background:#1f2937;padding:20px;border-radius:16px;margin:16px 0}
+button,select,input,textarea{font:inherit}button{padding:13px 20px;border:0;border-radius:10px;background:#7dd3fc;color:#082f49;font-weight:700;margin:5px 5px 5px 0}
+button:disabled{opacity:.5}select,input[type=range],textarea{width:100%}
+small,.muted{color:#cbd5e1}label{display:block;margin-top:12px}
+textarea{box-sizing:border-box;background:#111827;color:white;border:1px solid #64748b;border-radius:8px;padding:10px}
+</style></head><body>
+<h1>Calm Frequency Lab</h1><p>Friends pilot · relaxation and sleep sound experiments</p>
+<div class="card"><h2>Choose a session</h2>
+<label>Program<select id="mode"><option value="relax">Relaxation — 20 minutes</option><option value="sleep">Bedtime wind-down — 30 minutes</option><option value="plain">Comparison: ordinary soothing sound — 20 minutes</option></select></label>
+<p id="desc"></p>
+<label>Volume: <span id="volText">15%</span><input id="vol" type="range" min="0" max="35" value="15"></label>
+<p><strong id="clock">20:00</strong> remaining</p>
+<button id="start">Start session</button><button id="stop" disabled>Stop</button>
+<p id="state" aria-live="polite">Ready. Use stereo headphones for binaural programs.</p>
+</div>
+<div class="card"><h2>Optional feedback</h2>
+<p class="muted">Your responses stay on your device unless you choose to copy and share them. Do not enter names or sensitive medical information.</p>
+<label>Session type<select id="feedbackMode"><option>Relaxation</option><option>Bedtime wind-down</option><option>Comparison sound</option></select></label>
+<label>Stress before (0–10)<input id="before" type="range" min="0" max="10" value="5"></label>
+<label>Stress after (0–10)<input id="after" type="range" min="0" max="10" value="5"></label>
+<label>Sleep onset estimate / next-morning restfulness (optional)<textarea id="notes" rows="3" placeholder="How did you sleep or feel? Any discomfort?"></textarea></label>
+<button id="copy">Copy feedback to share</button><p id="copied" aria-live="polite"></p>
+</div>
+<p><small>Not a medical treatment. Evidence that binaural beats improve sleep or anxiety is limited. Keep volume low. Stop if uncomfortable. Do not use while driving. Avoid wearing wired earbuds unattended during sleep; use the fade-out timer before sleeping. Some iPhones pause browser audio when locked or when switching apps. Sound starts only after tapping Start.</small></p>
+<script>
+const $=id=>document.getElementById(id), durations={relax:1200,sleep:1800,plain:1200};
+const descriptions={relax:"Gentle 200 Hz left / 210 Hz right binaural tones (10 Hz difference). Headphones required.",sleep:"Gentle 180 Hz left / 186 Hz right binaural tones (6 Hz difference). Headphones required.",plain:"Single 200 Hz tone in both ears with a slow, gentle volume swell. No binaural difference."};
+let ctx=null,osc=[],gain=null,interval=null,endAt=0,remaining=1200,playing=false;
+function display(){let m=Math.ceil(remaining);$('clock').textContent=`${Math.floor(m/60)}:${String(m%60).padStart(2,'0')}`}
+function update(){if(playing)return;remaining=durations[$('mode').value];$('desc').textContent=descriptions[$('mode').value];display()}
+function cleanup(){clearInterval(interval);interval=null;if(ctx){let old=ctx;ctx=null;setTimeout(()=>old.close().catch(()=>{}),150)}osc=[];gain=null;playing=false;$('start').disabled=false;$('stop').disabled=true;$('mode').disabled=false}
+function stop(){if(!playing)return;if(gain&&ctx){gain.gain.cancelScheduledValues(ctx.currentTime);gain.gain.setTargetAtTime(0,ctx.currentTime,.05)}cleanup();$('state').textContent="Stopped."}
+async function start(){
+if(playing)return;
+try{
+ctx=new (window.AudioContext||window.webkitAudioContext)();await ctx.resume();
+let mode=$('mode').value,duration=durations[mode],v=Number($('vol').value)/100;
+gain=ctx.createGain();gain.gain.value=0;gain.connect(ctx.destination);
+const merger=ctx.createChannelMerger(2);
+merger.connect(gain);
+let freqs=mode==='relax'?[200,210]:mode==='sleep'?[180,186]:[200,200];
+freqs.forEach((f,i)=>{let o=ctx.createOscillator(),g=ctx.createGain();o.type='sine';o.frequency.value=f;g.gain.value=.5;o.connect(g);g.connect(merger,0,i);o.start();osc.push(o)});
+gain.gain.setTargetAtTime(v,ctx.currentTime,.25);
+if(mode==='plain'){let lfo=ctx.createOscillator(),lg=ctx.createGain();lfo.frequency.value=.12;lg.gain.value=v*.12;lfo.connect(lg);lg.connect(gain.gain);lfo.start();osc.push(lfo)}
+gain.gain.setValueAtTime(v,ctx.currentTime+Math.max(1,duration-60));
+gain.gain.linearRampToValueAtTime(0,ctx.currentTime+duration);
+endAt=Date.now()+duration*1000;remaining=duration;playing=true;$('start').disabled=true;$('stop').disabled=false;$('mode').disabled=true;$('state').textContent="Playing softly. Stop any time.";
+interval=setInterval(()=>{remaining=Math.max(0,(endAt-Date.now())/1000);display();if(remaining<=0){cleanup();$('state').textContent="Session complete."}},500);
+}catch(e){cleanup();$('state').textContent="Audio could not start. Try Safari or Chrome and tap Start again."}
+}
+$('mode').addEventListener('change',update);$('start').onclick=start;$('stop').onclick=stop;
+$('vol').oninput=()=>{$('volText').textContent=$('vol').value+'%';if(gain&&ctx&&playing){gain.gain.cancelScheduledValues(ctx.currentTime);gain.gain.setTargetAtTime(Number($('vol').value)/100,ctx.currentTime,.08)}};
+$('copy').onclick=async()=>{let report=`Calm Frequency Lab feedback\nProgram: ${$('feedbackMode').value}\nStress before: ${$('before').value}/10\nStress after: ${$('after').value}/10\nNotes: ${$('notes').value}`;try{await navigator.clipboard.writeText(report);$('copied').textContent="Copied. Paste into a message to the organizer."}catch(e){$('copied').textContent=report}};
+update();
+</script></body></html>
